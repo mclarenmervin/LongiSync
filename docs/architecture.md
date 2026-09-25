@@ -1,44 +1,42 @@
-# LongiSync architecture
+# Architecture
 
-The repository originally contained a SwiftUI starter. It remains unchanged. The Flutter app lives at the repository root; use `ios/Runner.xcworkspace`, not `Longisync.xcodeproj`, for Flutter builds.
+LongiSync is a feature-first Flutter application. The Flutter iOS project is
+`ios/Runner.xcworkspace`; Android sources are under `android/`.
 
-- `lib/main.dart`: bootstrap and Riverpod scope.
-- `lib/app`: app, GoRouter navigation, light/dark design tokens.
-- `lib/core/api`: centralized environment configuration, Dio transport, safe errors.
-- `lib/core/auth`: secure access/refresh token storage interface.
-- `lib/core/widgets`: adaptive navigation and reusable feature states.
-- `lib/features/<feature>`: screens, models, data repositories, and providers as each feature is implemented. Avoid empty speculative implementation classes.
+## Application layers
 
-UI consumes providers; repositories own data access. Demo data and live data must stay visibly distinct. Never silently replace live health records with demo records after an API failure. No passwords, tokens, medical data, or genetic data may be logged.
+- `lib/app`: themes, navigation, and the adaptive application shell.
+- `lib/core`: shared API, authentication, configuration, storage, and widgets.
+- `lib/features`: screens, providers, models, repositories, and domain services.
+- `supabase/migrations`: PostgreSQL tables, transactional functions, indexes,
+  and row-level security policies.
 
-## Configuration
+Riverpod providers expose application state to the UI. Repositories own local
+and remote persistence. Health and journal models provide a shared normalized
+format used by dashboards, trends, reports, correlations, and insights.
 
-`APP_ENV`: development (default), staging, production.
-`API_BASE_URL`: http://localhost:8000 by default. Android Emulator uses http://10.0.2.2:8000. Staging/production require an explicit HTTPS URL.
-`USE_MOCKS`: true by default. The backend contract is provisional; server integration requires matching payloads, token expiry/refresh policy, and backend tests before release.
+## Persistence
 
-Refresh-token storage is prepared; automatic refresh is deliberately deferred until the backend defines rotation/revocation behavior. Authenticated 401 responses must invalidate the session. No HTTP payload logging interceptor is installed.
+Authenticated data is written to dedicated Supabase tables through
+`save_normalized_wellness`, which replaces a user's logical snapshot in one
+database transaction. `load_normalized_wellness` reconstructs the app model.
+Every personal table uses `auth.uid()` row-level security. Encrypted local
+storage provides offline fallback. The original `wellness_documents` table is
+retained only to migrate accounts created before the normalized schema.
 
-## Later phases
+## Wearables
 
-Profile, event/sub-event paginated timestamped readings, therapies, environment, genetics metadata, reports, AI backend integration, and wearable adapters remain separate features. HealthKit, Health Connect, Bluetooth, location, and notification permissions are requested only when their future feature is explicitly enabled. No device API or AI provider key belongs in UI code. Genetic data must not imply diagnosis or disease prediction.
+Android ring discovery uses `flutter_blue_plus`. Device communication uses the
+bundled Bonlala SDK through the `longisync/wearable_sdk` method channel in
+`MainActivity.kt`. The bridge validates live packets, imports daily history,
+and sends normalized data to Flutter. Apple Health and Health Connect use the
+`health` package behind explicit consent controls.
 
-## Phase 1
+The Bonlala vendor SDK is Android-only. An iOS ring integration requires an iOS
+SDK or a documented Bluetooth protocol from the hardware vendor.
 
-Created iOS/Android runners, feature-first foundation, Riverpod scope, GoRouter five-tab shell with iPad navigation rail, themes, API configuration, Dio authorization handling, secure token interface, and navigation/configuration tests.
+## Security
 
-Required dependencies: flutter_riverpod, go_router, dio, flutter_secure_storage, fl_chart, intl. Exact versions are locked in pubspec.lock. Models currently use plain Dart; code generation is unnecessary at this stage.
-
-## Phase 2
-
-Implemented splash/session restoration, onboarding, validated login/signup/reset forms, safe failure messages, sign out, and route protection. `AuthRepository` separates a clearly labeled demo implementation from a provisional FastAPI JSON adapter. Demo signup deliberately opens Alex's sample account; it does not register a real user, save submitted personal information, or send an email. Only a demo session marker is retained in secure storage. A real API adapter expects `access_token`, optional `refresh_token`, and `user: {id, full_name, email}` from login/register. Confirm this schema with the backend before live use. A network failure during restoration shows Retry; it does not silently create a demo session.
-
-## Phase 3 / first implementation scope
-
-Implemented dashboard and health overview with ten metrics, seven days of mock measurements, timestamp-aware day/week/month/year selection, metric detail sheets, loading/error/empty states, and responsive light/dark layouts. Chart percent changes compare the prior sample day without clinical interpretation. Step goals and summary copy are illustrative. No invented longevity score is presented. The mock series has daily samples, so Day shows a single observation and longer periods show only available records.
-
-Added a `HealthDataSource` contract for future permission-scoped adapters. Profile currently shows identity, appearance, logout, and links to future modules; comprehensive medical/body/goals editing is deferred to Phase 4. Timeline, reports, therapies, environment, genetics, AI, and devices are explicitly labeled placeholders. No real wearable or AI integration is active. Live health integration is deferred and presents a clear unavailable state with `USE_MOCKS=false`.
-
-Authentication tests cover demo login, validation, navigation, logout; responsive tests cover restored sessions at 320×568, 393×852, and 1024×768 in light/dark mode. Data tests verify timestamps, IDs, user scope, and calendar filtering. API configuration tests enforce HTTPS outside development.
-
-Secure storage uses the 10.x release line (locked to 10.3.1) for compatibility with Flutter 3.38.4 and Android compile SDK 36. Android SDK settings retain the Flutter defaults. No iOS permission or entitlement prompts are added at startup.
+The client receives only a Supabase publishable key. Database passwords and
+service-role keys must remain outside the application. Tokens and offline data
+use platform secure storage. Personal health payloads are not logged.
